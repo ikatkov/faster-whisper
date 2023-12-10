@@ -1,4 +1,20 @@
 # Multilingual Dictation App based on OpenAI Whisper
+
+This is a fork of https://github.com/foges/whisper-dictation
+
+I've replaced the openAI's whisper with https://github.com/SYSTRAN/faster-whisper
+
+It does work. With CPU only - I can see x2.3 speed increase. You can use medium model with acceptable time lag.
+
+The ugly part is that faster-whisper uses `ctranslate2` which needs `libiomp5.dylib` and `openai-whisper` uses `torch` which needs `libiomp5.dylib`, but these are different `libiomp5` 
+
+The code below does the ugliest hack possible by installing/uninstalling `torch`.
+
+To use with OpenAI lib, use `-i openai` (default), to use faster-whisper do`-i fast-whisper`. 
+
+Example `python whisper-dictation.py -m medium -i fast-whisper`
+
+--- 
 Multilingual dictation app based on the powerful OpenAI Whisper ASR model(s) to provide accurate and efficient speech-to-text conversion in any application. The app runs in the background and is triggered through a keyboard shortcut. It is also entirely offline, so no data will be shared. It allows users to set up their own keyboard combinations and choose from different Whisper models, and languages.
 
 ## Prerequisites

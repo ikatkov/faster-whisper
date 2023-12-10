@@ -5,16 +5,35 @@ import pyaudio
 import numpy as np
 import rumps
 from pynput import keyboard
-from whisper import load_model
+import importlib
 import platform
+import subprocess
 
-class SpeechTranscriber:
-    def __init__(self, model):
+
+class BaseSpeechTranscriber:
+    def __init__(self, model, language=None):
         self.model = model
+        self.language = language
         self.pykeyboard = keyboard.Controller()
 
     def transcribe(self, audio_data, language=None):
-        result = self.model.transcribe(audio_data, language=language)
+        start_time = time.time()
+        self._transcribe_logic(audio_data, language)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print("Elapsed time: ", elapsed_time)
+
+    def _transcribe_logic(self, audio_data, language=None):
+        raise NotImplementedError(
+            "Subclasses must implement the _transcribe_logic method")
+
+
+class SpeechTranscriberOpenAi(BaseSpeechTranscriber):
+    def __init__(self, model, language=None):
+        super().__init__(model, language)
+
+    def _transcribe_logic(self, audio_data, language=None):
+        result = self.model.transcribe(audio_data, language=self.language)
         is_first = True
         for element in result["text"]:
             if is_first and element == " ":
@@ -27,6 +46,33 @@ class SpeechTranscriber:
             except:
                 pass
 
+
+class SpeechTranscriberFasterWhisper(BaseSpeechTranscriber):
+    def __init__(self, model):
+        self.model = model
+        self.pykeyboard = keyboard.Controller()
+
+    def _transcribe_logic(self, audio_data, language=None):
+        segments, info = lt = self.model.transcribe(audio_data, beam_size=5)
+        print("Detected language '%s' with probability %f" %
+              (info.language, info.language_probability))
+
+        is_first = True
+        for element in segments:
+            print("[%.2fs -> %.2fs] %s" %
+                  (element.start, element.end, element.text))
+
+            if is_first and element.text == " ":
+                is_first = False
+                continue
+
+            try:
+                self.pykeyboard.type(element.text)
+                time.sleep(0.0025)
+            except:
+                pass
+
+
 class Recorder:
     def __init__(self, transcriber):
         self.recording = False
@@ -38,7 +84,6 @@ class Recorder:
 
     def stop(self):
         self.recording = False
-
 
     def _record_impl(self, language):
         self.recording = True
@@ -62,6 +107,7 @@ class Recorder:
         audio_data = np.frombuffer(b''.join(frames), dtype=np.int16)
         audio_data_fp32 = audio_data.astype(np.float32) / 32768.0
         self.transcriber.transcribe(audio_data_fp32, language)
+        print('Transcribing done.\n')
 
 
 class GlobalKeyListener:
@@ -110,7 +156,7 @@ class StatusBarApp(rumps.App):
                 callback = self.change_language if lang != self.current_language else None
                 menu.append(rumps.MenuItem(lang, callback=callback))
             menu.append(None)
-            
+
         self.menu = menu
         self.menu['Stop Recording'].set_callback(None)
 
@@ -123,7 +169,8 @@ class StatusBarApp(rumps.App):
     def change_language(self, sender):
         self.current_language = sender.title
         for lang in self.languages:
-            self.menu[lang].set_callback(self.change_language if lang != self.current_language else None)
+            self.menu[lang].set_callback(
+                self.change_language if lang != self.current_language else None)
 
     @rumps.clicked('Start Recording')
     def start_app(self, _):
@@ -134,7 +181,8 @@ class StatusBarApp(rumps.App):
         self.recorder.start(self.current_language)
 
         if self.max_time is not None:
-            self.timer = threading.Timer(self.max_time, lambda: self.stop_app(None))
+            self.timer = threading.Timer(
+                self.max_time, lambda: self.stop_app(None))
             self.timer.start()
 
         self.start_time = time.time()
@@ -144,7 +192,7 @@ class StatusBarApp(rumps.App):
     def stop_app(self, _):
         if not self.started:
             return
-        
+
         if self.timer is not None:
             self.timer.cancel()
 
@@ -154,7 +202,6 @@ class StatusBarApp(rumps.App):
         self.menu['Stop Recording'].set_callback(None)
         self.menu['Start Recording'].set_callback(self.start_app)
         self.recorder.stop()
-        print('Done.\n')
 
     def update_title(self):
         if self.started:
@@ -170,12 +217,29 @@ class StatusBarApp(rumps.App):
             self.start_app(None)
 
 
+def add_package(package_name):
+    try:
+        subprocess.check_call(['pip', 'install', package_name])
+        print(f'Successfully added {package_name}')
+    except subprocess.CalledProcessError as e:
+        print(f'Error adding {package_name}: {e}')
+
+
+def remove_package(package_name):
+    try:
+        subprocess.check_call(['pip', 'uninstall', package_name])
+        print(f'Successfully removed {package_name}')
+    except subprocess.CalledProcessError as e:
+        print(f'Error removing {package_name}: {e}')
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Dictation app using the OpenAI whisper ASR model. By default the keyboard shortcut cmd+option '
+        description='Dictation app using the OpenAI whisper or fast-whisper ASR model. By default the keyboard shortcut cmd+option '
         'starts and stops dictation')
     parser.add_argument('-m', '--model_name', type=str,
-                        choices=['tiny', 'tiny.en', 'base', 'base.en', 'small', 'small.en', 'medium', 'medium.en', 'large'],
+                        choices=['tiny', 'tiny.en', 'base', 'base.en',
+                                 'small', 'small.en', 'medium', 'medium.en', 'large'],
                         default='base',
                         help='Specify the whisper ASR model to use. Options: tiny, base, small, medium, or large. '
                         'To see the  most up to date list of models along with model size, memory footprint, and estimated '
@@ -193,6 +257,9 @@ def parse_args():
     parser.add_argument('-t', '--max_time', type=float, default=30,
                         help='Specify the maximum recording time in seconds. The app will automatically stop recording after this duration. '
                         'Default: 30 seconds.')
+    parser.add_argument('-i', '--implementation', type=str, default='openai',
+                        help='Use openai whisper or faster-whisper implementation.'
+                        'Default: openai.')
 
     args = parser.parse_args()
 
@@ -200,7 +267,8 @@ def parse_args():
         args.language = args.language.split(',')
 
     if args.model_name.endswith('.en') and args.language is not None and any(lang != 'en' for lang in args.language):
-        raise ValueError('If using a model ending in .en, you cannot specify a language other than English.')
+        raise ValueError(
+            'If using a model ending in .en, you cannot specify a language other than English.')
 
     return args
 
@@ -208,19 +276,29 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
-    print("Loading model...")
     model_name = args.model_name
-    model = load_model(model_name)
+    if (args.implementation == 'openai'):
+        print("Loading whisper model...")
+        add_package("torch")
+        whisper = importlib.import_module('whisper')
+        model = whisper.load_model(model_name)
+        transcriber = SpeechTranscriberOpenAi(model)
+    else:
+        print("Loading faster-whisper model...")
+        remove_package("torch")
+        faster_whisper = importlib.import_module('faster_whisper')
+        model = faster_whisper.WhisperModel(
+            model_name, device="cpu", compute_type="int8")
+        transcriber = SpeechTranscriberFasterWhisper(model)
+
     print(f"{model_name} model loaded")
-    
-    transcriber = SpeechTranscriber(model)
     recorder = Recorder(transcriber)
-    
+
     app = StatusBarApp(recorder, args.language, args.max_time)
     key_listener = GlobalKeyListener(app, args.key_combination)
-    listener = keyboard.Listener(on_press=key_listener.on_key_press, on_release=key_listener.on_key_release)
+    listener = keyboard.Listener(
+        on_press=key_listener.on_key_press, on_release=key_listener.on_key_release)
     listener.start()
 
     print("Running... ")
     app.run()
-
