@@ -1,5 +1,7 @@
 # Multilingual Dictation App based on OpenAI Whisper
 
+## Change
+
 This is a fork of https://github.com/foges/whisper-dictation
 
 I've replaced the openAI's whisper with https://github.com/SYSTRAN/faster-whisper
@@ -8,13 +10,22 @@ It does work. With CPU only - I can see x2.3 speed increase. You can use medium 
 
 The ugly part is that faster-whisper uses `ctranslate2` which needs `libiomp5.dylib` and `openai-whisper` uses `torch` which needs `libiomp5.dylib`, but these are different `libiomp5` 
 
+And the code fails at run-time.
+
+```
+OMP: Error #15: Initializing libiomp5.dylib, but found libiomp5.dylib already initialized.
+OMP: Hint This means that multiple copies of the OpenMP runtime have been linked into the program. That is dangerous, since it can degrade performance or cause incorrect results. The best thing to do is to ensure that only a single OpenMP runtime is linked into the process, e.g. by avoiding static linking of the OpenMP runtime in any library. As an unsafe, unsupported, undocumented workaround you can set the environment variable KMP_DUPLICATE_LIB_OK=TRUE to allow the program to continue to execute, but that may cause crashes or silently produce incorrect results. For more information, please see http://www.intel.com/software/products/support/
+```
+
+
 The code below does the ugliest hack possible by installing/uninstalling `torch`.
 
 To use with OpenAI lib, use `-i openai` (default), to use faster-whisper do`-i fast-whisper`. 
 
 Example `python whisper-dictation.py -m medium -i fast-whisper`
 
---- 
+## Original
+
 Multilingual dictation app based on the powerful OpenAI Whisper ASR model(s) to provide accurate and efficient speech-to-text conversion in any application. The app runs in the background and is triggered through a keyboard shortcut. It is also entirely offline, so no data will be shared. It allows users to set up their own keyboard combinations and choose from different Whisper models, and languages.
 
 ## Prerequisites
